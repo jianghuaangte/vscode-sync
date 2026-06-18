@@ -22,6 +22,7 @@ jobs:
             | jq -r '.[0]')
 
           echo "Latest Version: $VERSION"
+
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Check release exists
@@ -31,13 +32,18 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
-          if gh release view "$VERSION" >/dev/null 2>&1; then
+          if gh release view "$VERSION" \
+            --repo "${{ github.repository }}" >/dev/null 2>&1; then
+
             echo "exists=true" >> "$GITHUB_OUTPUT"
+
           else
+
             echo "exists=false" >> "$GITHUB_OUTPUT"
+
           fi
 
-      - name: Create release
+      - name: Create Release
         if: steps.check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -45,13 +51,14 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
 
           gh release create "$VERSION" \
+            --repo "${{ github.repository }}" \
             --title "VS Code $VERSION" \
             --notes "Automatically mirrored from Microsoft VS Code"
 
       - name: Create platform list
         if: steps.check.outputs.exists == 'false'
         run: |
-          cat > platforms.txt <<'EOF'
+          cat > platforms.txt << 'EOF'
           win32-x64
           win32-x64-user
           win32-x64-archive
@@ -99,25 +106,44 @@ jobs:
 
             URL="https://update.code.visualstudio.com/${VERSION}/${PLATFORM}/stable"
 
-            echo "==== $PLATFORM ===="
+            echo ""
+            echo "===================="
+            echo "$PLATFORM"
+            echo "$URL"
+            echo "===================="
 
-            FINAL_URL=$(curl -sIL "$URL" | grep -i '^location:' | tail -1 | tr -d '\r' | cut -d' ' -f2-)
+            FINAL_URL=$(curl -sIL "$URL" \
+              | grep -i '^location:' \
+              | tail -1 \
+              | tr -d '\r' \
+              | cut -d' ' -f2-)
 
             if [ -z "$FINAL_URL" ]; then
-              echo "Skip $PLATFORM"
+              echo "Skip"
               continue
             fi
 
             FILENAME=$(basename "${FINAL_URL%%\?*}")
 
-            echo "Downloading $FILENAME"
+            OUTPUT="downloads/${PLATFORM}-${FILENAME}"
 
-            curl -L \
+            echo "Downloading -> $OUTPUT"
+
+            if curl -L \
               --fail \
               --retry 3 \
               --retry-delay 5 \
-              -o "downloads/$FILENAME" \
-              "$URL"
+              -o "$OUTPUT" \
+              "$URL"; then
+
+              echo "Success"
+
+            else
+
+              echo "Failed"
+              rm -f "$OUTPUT"
+
+            fi
 
           done < platforms.txt
 
@@ -129,6 +155,7 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
 
           for FILE in downloads/*; do
+
             [ -f "$FILE" ] || continue
 
             echo "Uploading $(basename "$FILE")"
@@ -136,5 +163,7 @@ jobs:
             gh release upload \
               "$VERSION" \
               "$FILE" \
+              --repo "${{ github.repository }}" \
               --clobber
+
           done
